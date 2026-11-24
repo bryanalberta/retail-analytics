@@ -31,6 +31,7 @@ DEFAULT_DATA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     'data', 'online_retail_II.xlsx'
 )
+DEFAULT_PARQUET_PATH = os.path.splitext(DEFAULT_DATA_PATH)[0] + '.parquet'
 
 
 class DataLoadError(Exception):
@@ -226,6 +227,23 @@ def load_and_combine(
         'combined': {}
     }
     
+    # Sumber cepat: Parquet hasil konversi dari Excel yang sama
+    # (dipakai di deployment karena Excel 45 MB terlalu besar untuk Git)
+    if uploaded_file is None and filepath is None and os.path.isfile(DEFAULT_PARQUET_PATH):
+        df_all = pd.read_parquet(DEFAULT_PARQUET_PATH)
+        load_info['source'] = DEFAULT_PARQUET_PATH
+        dataframes = []
+        for sheet_name in EXPECTED_SHEETS:
+            df = df_all[df_all['__sheet'] == sheet_name].drop(columns='__sheet').reset_index(drop=True)
+            if df.empty:
+                continue
+            validate_columns(df, sheet_name)
+            load_info['sheets'].append(get_sheet_info(df, sheet_name))
+            dataframes.append(df)
+        if not dataframes:
+            raise DataLoadError("File Parquet tidak berisi sheet yang diharapkan.")
+        return _combine(dataframes, load_info)
+
     # Tentukan sumber data
     if uploaded_file is not None:
         try:
@@ -255,7 +273,12 @@ def load_and_combine(
         dataframes.append(df)
     
     xls.close()
-    
+
+    return _combine(dataframes, load_info)
+
+
+def _combine(dataframes: list, load_info: Dict) -> Tuple[pd.DataFrame, Dict]:
+    """Menggabungkan sheet, menghapus overlap, dan mengisi statistik gabungan."""
     # Gabungkan
     if len(dataframes) == 1:
         df_combined = dataframes[0].copy()
