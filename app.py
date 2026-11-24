@@ -104,16 +104,34 @@ from streamlit_option_menu import option_menu
 # CACHED DATA LOADING & PREPROCESSING
 # ==============================================================================
 
-@st.cache_data(show_spinner="Memuat dataset (mungkin memakan waktu beberapa menit)...")
+STRING_COLUMNS = ['Invoice', 'StockCode', 'Description', 'Country', 'TransactionType']
+
+
+@st.cache_resource(show_spinner="Memuat dataset...")
 def get_data():
-    """Memuat dan membersihkan data. Di-cache agar tidak diulang."""
+    """
+    Memuat dan membersihkan data sekali per server, lalu dibagi ke semua sesi.
+
+    cache_resource (bukan cache_data) agar dataframe ~1 juta baris tidak
+    disalin ulang di setiap interaksi. Hanya yang dipakai halaman yang disimpan:
+    data sales, tabel RFM per pelanggan, dan 100 baris contoh data bersih.
+    Kode di bawah tidak boleh mengubah dataframe ini secara in-place.
+    """
     df_raw, load_info = load_and_combine()
     df_clean, df_sales, df_rfm, audit_log = preprocess_data(df_raw)
-    return df_clean, df_sales, df_rfm, load_info, audit_log
+    del df_raw
+    clean_preview = df_clean.head(100).copy()
+    clean_rows = len(df_clean)
+    del df_clean
+    rfm_df = calculate_rfm(df_rfm)
+    del df_rfm
+    for col in STRING_COLUMNS:
+        df_sales[col] = df_sales[col].astype('string[pyarrow]')
+    return clean_preview, clean_rows, df_sales, rfm_df, load_info, audit_log
 
 # Muat data
 try:
-    df_clean, df_sales, df_rfm, load_info, audit_log = get_data()
+    clean_preview, clean_rows, df_sales, rfm_df, load_info, audit_log = get_data()
 except Exception as e:
     st.error(f"Gagal memuat dataset: {str(e)}")
     st.info("Pastikan file 'online_retail_II.xlsx' ada di dalam folder 'data/'.")
@@ -166,7 +184,7 @@ with st.sidebar:
             st.rerun()
 
 # Terapkan Filter
-df_filtered = df_sales.copy()
+df_filtered = df_sales  # filter di bawah membuat frame baru; jangan diubah in-place
 if menu == "Ringkasan Dashboard":
     if selected_country != 'Semua Negara':
         df_filtered = df_filtered[df_filtered['Country'] == selected_country]
@@ -252,8 +270,8 @@ elif menu == "Eksplorasi Data":
     
     with tab1:
         st.markdown("### Data Setelah Preprocessing")
-        st.write(f"Menampilkan sampel dari **{len(df_clean):,}** total baris data.")
-        st.dataframe(df_clean.head(100), use_container_width=True)
+        st.write(f"Menampilkan sampel dari **{clean_rows:,}** total baris data.")
+        st.dataframe(clean_preview, use_container_width=True)
         
     with tab2:
         st.markdown("### Laporan Pembersihan Data (Tahap 2)")
@@ -285,16 +303,11 @@ elif menu == "Segmentasi Pelanggan":
     st.markdown('<p class="main-header">Customer Segmentation (RFM)</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Clustering perilaku pembelian menggunakan K-Means Machine Learning</p>', unsafe_allow_html=True)
     
-    if df_rfm.empty:
+    if rfm_df.empty:
         st.warning("Tidak ada data valid untuk melakukan segmentasi RFM.")
     else:
-        # Cache proses RFM agar cepat saat render ulang
-        @st.cache_data(show_spinner="Menghitung nilai RFM...")
-        def get_rfm(df):
-            return calculate_rfm(df)
-            
-        rfm_df = get_rfm(df_rfm)
-        
+        # Tabel RFM sudah dihitung sekali di get_data()
+
         # Pengaturan Clustering di Sidebar atau form
         st.markdown('<h3 style="color: var(--text-color); font-weight: 700; font-size: 1.2rem; margin-bottom: 1rem;"><i class="fa-solid fa-gears" style="color: #0F766E; margin-right: 8px;"></i> Pengaturan K-Means</h3>', unsafe_allow_html=True)
         col_k, col_info = st.columns([1, 2])

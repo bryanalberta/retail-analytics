@@ -57,7 +57,7 @@ def get_monthly_sales_trend(df_sales: pd.DataFrame) -> pd.DataFrame:
     Menghasilkan tren penjualan kotor dan bersih per bulan.
     """
     # Buat kolom Tahun-Bulan (YYYY-MM)
-    df = df_sales.copy()
+    df = df_sales[['InvoiceDate', 'TotalValue', 'Invoice']].copy()
     df['YearMonth'] = df['InvoiceDate'].dt.to_period('M')
     
     # Agregasi
